@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environment
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Local datasets / videos
+data/*
+!data/.gitkeep
+
+# Generated results
+outputs/*
+!outputs/.gitkeep
+
+# Model weights and downloaded configs
+checkpoints/*
+!checkpoints/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
