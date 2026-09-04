@@ -1,0 +1,92 @@
+services:
+  redis:
+    image: redis:7-alpine
+
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    environment:
+      REDIS_URL: redis://redis:6379/0
+
+    volumes:
+      - ./data:/app/data
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    command:
+      [
+        "uvicorn",
+        "app.api.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ]
+
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      MODEL_CONFIG: /app/configs/rtmdet_bag.py
+      MODEL_CHECKPOINT: /app/checkpoints/bag_detector.pth
+      MODEL_DEVICE: cuda:0
+      SCORE_THRESHOLD: "0.25"
+
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints:ro
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    gpus: all
+
+    command:
+      [
+        "celery",
+        "-A",
+        "app.worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--pool=solo"
+      ]
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    ports:
+      - "3000:80"
+
+    depends_on:
+      - api

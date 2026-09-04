@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Bag Counter</title>
+
+    <link
+        rel="stylesheet"
+        href="/styles.css"
+    >
+</head>
+
+<body>
+    <main class="container">
+
+        <header class="header">
+            <div>
+                <p class="eyebrow">
+                    Computer Vision System
+                </p>
+
+                <h1>
+                    Bag Counter
+                </h1>
+
+                <p class="subtitle">
+                    Upload conveyor video and track
+                    processing in real time.
+                </p>
+            </div>
+
+            <div
+                id="api-status"
+                class="api-status"
+            >
+                <span class="status-dot"></span>
+                API
+            </div>
+        </header>
+
+        <section class="card upload-card">
+
+            <h2>
+                Process video
+            </h2>
+
+            <label
+                class="drop-zone"
+                id="drop-zone"
+                for="video-input"
+            >
+                <input
+                    id="video-input"
+                    type="file"
+                    accept="video/mp4"
+                    hidden
+                >
+
+                <div class="upload-icon">
+                    ↑
+                </div>
+
+                <strong id="file-title">
+                    Select MP4 video
+                </strong>
+
+                <span id="file-description">
+                    Click or drag & drop
+                </span>
+            </label>
+
+            <button
+                id="upload-button"
+                class="primary-button"
+                disabled
+            >
+                Start processing
+            </button>
+
+        </section>
+
+        <section
+            id="job-card"
+            class="card hidden"
+        >
+
+            <div class="job-header">
+
+                <div>
+                    <p class="label">
+                        JOB
+                    </p>
+
+                    <p
+                        id="job-id"
+                        class="job-id"
+                    ></p>
+                </div>
+
+                <div
+                    id="job-status"
+                    class="badge"
+                >
+                    queued
+                </div>
+
+            </div>
+
+            <div class="progress-wrapper">
+
+                <div class="progress-info">
+                    <span>
+                        Processing
+                    </span>
+
+                    <strong id="progress-text">
+                        0%
+                    </strong>
+                </div>
+
+                <div class="progress-track">
+                    <div
+                        id="progress-bar"
+                        class="progress-bar"
+                    ></div>
+                </div>
+
+            </div>
+
+            <div class="metrics">
+
+                <div class="metric">
+                    <span>
+                        Bags
+                    </span>
+
+                    <strong id="bags-count">
+                        —
+                    </strong>
+                </div>
+
+                <div class="metric">
+                    <span>
+                        Frames
+                    </span>
+
+                    <strong id="frames-count">
+                        0 / 0
+                    </strong>
+                </div>
+
+                <div class="metric">
+                    <span>
+                        Time
+                    </span>
+
+                    <strong id="elapsed-time">
+                        —
+                    </strong>
+                </div>
+
+                <div class="metric">
+                    <span>
+                        Anomalies
+                    </span>
+
+                    <strong id="anomaly-count">
+                        0
+                    </strong>
+                </div>
+
+            </div>
+
+            <div
+                id="anomaly-section"
+                class="anomaly-section hidden"
+            >
+                <h3>
+                    Detected anomalies
+                </h3>
+
+                <div id="anomaly-list"></div>
+            </div>
+
+            <a
+                id="download-button"
+                class="primary-button download-button hidden"
+                href="#"
+            >
+                Download result video
+            </a>
+
+            <p
+                id="error-message"
+                class="error-message hidden"
+            ></p>
+
+        </section>
+
+    </main>
+
+    <script src="/app.js"></script>
+</body>
+</html>
