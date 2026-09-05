@@ -6,9 +6,16 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PIP_NO_CACHE_DIR=1
 
+# Runtime libraries required by OpenCV/MMCV.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN pip install --upgrade pip
 
-# MMCV needs a wheel matching CUDA 11.8 + PyTorch 2.1
+# MMCV wheel matching CUDA 11.8 + PyTorch 2.1.
 RUN pip install \
     mmcv==2.1.0 \
     -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1.0/index.html
@@ -30,8 +37,6 @@ COPY app ./app
 COPY configs ./configs
 COPY scripts ./scripts
 
-RUN mkdir -p \
-    /app/data/jobs \
-    /app/checkpoints
+RUN mkdir -p /app/data/jobs /app/checkpoints
 
 CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

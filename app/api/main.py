@@ -8,7 +8,6 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.worker.celery_app import celery_app
-from app.worker.tasks import process_video
 
 
 app = FastAPI(
@@ -21,15 +20,23 @@ JOBS_DIR = Path("data/jobs")
 
 @app.on_event("startup")
 def startup() -> None:
-    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    JOBS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+    }
 
 
-@app.post("/jobs", status_code=202)
+@app.post(
+    "/jobs",
+    status_code=202,
+)
 def create_job(
     file: UploadFile = File(...),
 ) -> dict:
@@ -44,16 +51,27 @@ def create_job(
     job_id = uuid4().hex
 
     job_dir = JOBS_DIR / job_id
-    job_dir.mkdir(parents=True)
+
+    job_dir.mkdir(
+        parents=True,
+        exist_ok=False,
+    )
 
     input_path = job_dir / "input.mp4"
     output_path = job_dir / "output.mp4"
 
-    with input_path.open("wb") as destination:
-        while chunk := file.file.read(1024 * 1024):
-            destination.write(chunk)
+    try:
+        with input_path.open("wb") as destination:
+            while chunk := file.file.read(
+                1024 * 1024
+            ):
+                destination.write(chunk)
 
-    process_video.apply_async(
+    finally:
+        file.file.close()
+
+    celery_app.send_task(
+        "process_video",
         args=[
             str(input_path),
             str(output_path),
@@ -68,7 +86,9 @@ def create_job(
 
 
 @app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
+def get_job(
+    job_id: str,
+) -> dict:
     job_dir = JOBS_DIR / job_id
 
     if not job_dir.exists():
@@ -89,10 +109,16 @@ def get_job(job_id: str) -> dict:
             "progress": 0.0,
         }
 
-    if task.state in {"STARTED", "PROGRESS"}:
+    if task.state in {
+        "STARTED",
+        "PROGRESS",
+    }:
         info = (
             task.info
-            if isinstance(task.info, dict)
+            if isinstance(
+                task.info,
+                dict,
+            )
             else {}
         )
 
@@ -114,11 +140,20 @@ def get_job(job_id: str) -> dict:
         }
 
     if task.state == "SUCCESS":
+        result = (
+            task.result
+            if isinstance(
+                task.result,
+                dict,
+            )
+            else {}
+        )
+
         return {
             "job_id": job_id,
             "status": "completed",
             "progress": 100.0,
-            **task.result,
+            **result,
         }
 
     if task.state == "FAILURE":
@@ -135,7 +170,9 @@ def get_job(job_id: str) -> dict:
 
 
 @app.get("/jobs/{job_id}/result")
-def download_result(job_id: str):
+def download_result(
+    job_id: str,
+) -> FileResponse:
     job_dir = JOBS_DIR / job_id
 
     if not job_dir.exists():
@@ -155,7 +192,10 @@ def download_result(job_id: str):
             detail="Result is not ready yet",
         )
 
-    output_path = job_dir / "output.mp4"
+    output_path = (
+        job_dir
+        / "output.mp4"
+    )
 
     if not output_path.exists():
         raise HTTPException(
