@@ -486,13 +486,14 @@ docker compose down
 Core counting and anomaly logic is tested independently from MMDetection and GPU inference.
 
 ```bash
-pytest -q
+uv sync
+uv run pytest -q
 ```
 
 Current result:
 
 ```text
-13 passed
+22 passed
 ```
 
 Tests cover:
@@ -506,6 +507,9 @@ Tests cover:
 - reverse-movement anomaly
 - low-confidence anomaly
 - anomaly deduplication
+- ByteTrack low-confidence second association
+- empty and prematurely terminated video rejection
+- output-file validation
 
 ### Why not unit-test exact neural-network predictions?
 

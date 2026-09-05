@@ -5,8 +5,8 @@ from pathlib import Path
 
 from app.cv.detector import MMDetectionDetector
 from app.cv.pipeline import VideoProcessingPipeline
+from app.cv.settings import DEFAULT_DETECTION_SCORE_THRESHOLD
 from app.worker.celery_app import celery_app
-
 
 _detector: MMDetectionDetector | None = None
 
@@ -33,7 +33,7 @@ DEVICE = os.getenv(
 SCORE_THRESHOLD = float(
     os.getenv(
         "SCORE_THRESHOLD",
-        "0.25",
+        str(DEFAULT_DETECTION_SCORE_THRESHOLD),
     )
 )
 

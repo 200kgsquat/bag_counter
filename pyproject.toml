@@ -3,5 +3,15 @@ name = "bag-counter"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "pytest>=9.1.1",
+    "numpy>=1.24,<2.0",
+    "supervision==0.26.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -65,7 +65,8 @@ services:
       MODEL_CONFIG: /app/configs/rtmdet_bag.py
       MODEL_CHECKPOINT: /app/checkpoints/bag_detector.pth
       MODEL_DEVICE: cuda:0
-      SCORE_THRESHOLD: "0.25"
+      # Keep ByteTrack's 0.10-0.25 second-association band available.
+      SCORE_THRESHOLD: "0.10"
 
     volumes:
       - ./data:/app/data

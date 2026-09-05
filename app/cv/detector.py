@@ -1,19 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
 
 import numpy as np
 from mmdet.apis import inference_detector, init_detector
 
-from app.cv.types import Detection
+from app.cv.settings import DEFAULT_DETECTION_SCORE_THRESHOLD
+from app.cv.types import Detection, Detector
 
-
-class Detector(Protocol):
-    """Interface consumed by the rest of the CV pipeline."""
-
-    def predict(self, frame: np.ndarray) -> list[Detection]:
-        ...
+__all__ = ["Detector", "MMDetectionDetector"]
 
 
 class MMDetectionDetector:
@@ -29,7 +24,7 @@ class MMDetectionDetector:
         checkpoint_path: str | Path,
         *,
         device: str = "cuda:0",
-        score_threshold: float = 0.25,
+        score_threshold: float = DEFAULT_DETECTION_SCORE_THRESHOLD,
     ) -> None:
         if not 0.0 <= score_threshold <= 1.0:
             raise ValueError("score_threshold must be in [0, 1]")

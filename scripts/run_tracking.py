@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.cv.detector import MMDetectionDetector
 from app.cv.pipeline import VideoProcessingPipeline
+from app.cv.settings import DEFAULT_DETECTION_SCORE_THRESHOLD
 
 
 def main() -> None:
@@ -14,7 +15,7 @@ def main() -> None:
             "best_coco_bbox_mAP_epoch_35.pth"
         ),
         device="cuda:0",
-        score_threshold=0.25,
+        score_threshold=DEFAULT_DETECTION_SCORE_THRESHOLD,
     )
 
     pipeline = VideoProcessingPipeline(

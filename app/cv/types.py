@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 
@@ -36,3 +37,10 @@ class Detection:
             (self.x1 + self.x2) / 2.0,
             (self.y1 + self.y2) / 2.0,
         )
+
+
+class Detector(Protocol):
+    """Framework-independent detector interface used by pipelines."""
+
+    def predict(self, frame: np.ndarray) -> list[Detection]:
+        ...

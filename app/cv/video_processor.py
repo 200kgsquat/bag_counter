@@ -9,8 +9,7 @@ from pathlib import Path
 import cv2
 from tqdm import tqdm
 
-from app.cv.detector import Detector
-from app.cv.types import Detection
+from app.cv.types import Detection, Detector
 
 
 @dataclass(slots=True)

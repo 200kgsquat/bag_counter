@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import supervision as sv
 
+from app.cv.settings import DEFAULT_TRACK_ACTIVATION_THRESHOLD
 from app.cv.types import Detection
 
 
@@ -31,7 +32,9 @@ class ByteTracker:
         self,
         *,
         frame_rate: int = 30,
-        track_activation_threshold: float = 0.25,
+        track_activation_threshold: float = (
+            DEFAULT_TRACK_ACTIVATION_THRESHOLD
+        ),
         lost_track_buffer: int = 30,
         minimum_matching_threshold: float = 0.8,
     ) -> None:

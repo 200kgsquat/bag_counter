@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
-from typing import Callable
 
 import cv2
 
 from app.cv.anomalies import AnomalyEvent, AnomalyMonitor
 from app.cv.counter import LineCrossingCounter
-from app.cv.detector import MMDetectionDetector
+from app.cv.settings import DEFAULT_TRACK_ACTIVATION_THRESHOLD
 from app.cv.tracker import ByteTracker
-
+from app.cv.types import Detector
 
 ProgressCallback = Callable[[int, int], None]
+
+FRAME_COUNT_TOLERANCE_RATIO = 0.01
+MIN_FRAME_COUNT_TOLERANCE = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,10 +30,61 @@ class ProcessingResult:
     output_path: Path
 
 
+def _validate_decoded_frame_count(
+    processed_frames: int,
+    total_frames: int,
+) -> None:
+    """Reject empty videos and suspicious early decoder termination.
+
+    OpenCV frame-count metadata can be slightly inaccurate, so a small
+    absolute/relative shortfall is accepted instead of requiring equality.
+    """
+    if processed_frames <= 0:
+        raise RuntimeError(
+            "Video does not contain any decodable frames"
+        )
+
+    if total_frames <= 0:
+        return
+
+    allowed_shortfall = max(
+        MIN_FRAME_COUNT_TOLERANCE,
+        ceil(total_frames * FRAME_COUNT_TOLERANCE_RATIO),
+    )
+    missing_frames = total_frames - processed_frames
+
+    if missing_frames > allowed_shortfall:
+        raise RuntimeError(
+            "Video decoding stopped unexpectedly: "
+            f"processed {processed_frames} of "
+            f"{total_frames} declared frames"
+        )
+
+
+def _validate_output_file(output_path: Path) -> None:
+    """Ensure the video writer produced a non-empty result file."""
+    if not output_path.is_file():
+        raise RuntimeError(
+            f"Output video was not created: {output_path}"
+        )
+
+    try:
+        output_size = output_path.stat().st_size
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot inspect output video: {output_path}"
+        ) from exc
+
+    if output_size <= 0:
+        raise RuntimeError(
+            f"Output video is empty: {output_path}"
+        )
+
+
 class VideoProcessingPipeline:
     def __init__(
         self,
-        detector: MMDetectionDetector,
+        detector: Detector,
     ) -> None:
         self.detector = detector
 
@@ -59,6 +114,14 @@ class VideoProcessingPipeline:
             capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
         )
 
+        if width <= 0 or height <= 0:
+            capture.release()
+
+            raise RuntimeError(
+                "Video has invalid frame dimensions: "
+                f"{width}x{height}"
+            )
+
         total_frames = int(
             capture.get(cv2.CAP_PROP_FRAME_COUNT)
         )
@@ -83,8 +146,10 @@ class VideoProcessingPipeline:
             )
 
         tracker = ByteTracker(
-            frame_rate=int(round(fps)),
-            track_activation_threshold=0.25,
+            frame_rate=round(fps),
+            track_activation_threshold=(
+                DEFAULT_TRACK_ACTIVATION_THRESHOLD
+            ),
             lost_track_buffer=30,
             minimum_matching_threshold=0.8,
         )
@@ -304,6 +369,12 @@ class VideoProcessingPipeline:
         finally:
             capture.release()
             writer.release()
+
+        _validate_decoded_frame_count(
+            processed_frames=processed_frames,
+            total_frames=total_frames,
+        )
+        _validate_output_file(output_path)
 
         elapsed_seconds = (
             time.perf_counter()
