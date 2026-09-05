@@ -2,4 +2,6 @@
 name = "bag-counter"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "pytest>=9.1.1",
+]
