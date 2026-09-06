@@ -27,3 +27,5 @@ checkpoints/*
 Thumbs.db
 
 work_dirs/
+
+**/node_modules

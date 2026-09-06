@@ -21,11 +21,15 @@ Before starting the application, make sure Docker is installed **and the Docker 
 You need:
 
 - Docker Desktop / Docker Engine
-- Docker Compose
+- Docker Compose **2.30.0 or newer** (required for `gpus: all`)
 - NVIDIA GPU
 - NVIDIA driver with Docker GPU support
 
 You do **not** need to install Python, PyTorch, MMDetection, Redis, Celery, OpenCV or Nginx on the host.
+
+On Windows, use Docker Desktop with the **WSL2 backend and Linux containers**.
+On Linux, install and configure the **NVIDIA Container Toolkit** for Docker.
+The downloader container includes `curl`; the host does not need it.
 
 ### Run
 
@@ -42,13 +46,29 @@ If GNU Make is installed:
 make app
 ```
 
-`make app` builds the images, downloads the model checkpoint when necessary, starts all services and waits until they become healthy.
+`make app` builds the images, downloads the model checkpoint when necessary,
+starts the services and streams their logs. It stays attached to the containers;
+this is expected. Use `docker compose ps` in another terminal to inspect health.
 
 If GNU Make is not available, for example on a default Windows installation, run the underlying Docker Compose command directly:
 
 ```bash
 docker compose up --build
 ```
+
+The worker loads the checkpoint and runs one synthetic frame on the GPU before
+starting Celery. Look for `MODEL_OK` in its logs. This verifies runtime
+compatibility, not counting accuracy. You can repeat the check with `make doctor`
+or `docker compose exec -T worker python -m scripts.check_runtime` when no job is
+being processed.
+
+For a detached launch that waits for service health, use
+`docker compose up --build --wait --wait-timeout 300`.
+
+The interface retries failed status requests automatically and restores the
+current job after refreshing the page. Upload progress and job processing
+progress are displayed separately. Temporary connection loss does not trigger
+another upload.
 
 Application:
 
@@ -490,14 +510,14 @@ The equivalent Docker Compose commands can also be used directly.
 Core counting and anomaly logic is tested independently from MMDetection and GPU inference.
 
 ```bash
-uv sync
+uv sync --inexact
 uv run pytest -q
 ```
 
 Current result:
 
 ```text
-22 passed
+26 passed
 ```
 
 Tests cover:
@@ -514,6 +534,31 @@ Tests cover:
 - ByteTrack low-confidence second association
 - empty and prematurely terminated video rejection
 - output-file validation
+- runtime-check success/failure reporting with a substituted GPU runtime
+
+`--inexact` preserves extra packages already installed in the environment.
+These Python dependencies cover core tests; GPU inference uses Docker.
+
+Frontend recovery tests use Node.js 18+ and a simulated DOM/API:
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend test
+```
+
+The 9 scenarios cover connection recovery, request timeouts, stale responses,
+page refresh, upload errors, duplicate submission prevention and large results.
+Node.js is only needed for these tests, not for running the Docker application.
+
+To apply a frontend update while a video is still being processed, rebuild only
+the frontend and then refresh the browser with Ctrl+F5:
+
+```bash
+docker compose up -d --build --no-deps frontend
+```
+
+Rebuild the worker after its current job finishes when applying backend or
+startup changes.
 
 ### Why not unit-test exact neural-network predictions?
 
@@ -539,6 +584,7 @@ Main limitations:
 - side-of-line calculation currently treats the boundary as an infinite mathematical line
 - ByteTrack can still produce ID switches under severe occlusion
 - deployment assumes a single GPU worker
+- job status and downloads depend on Celery metadata, which expires one hour after completion; the video file remains on disk
 - videos are stored on local disk
 - the detector is trained for a specific visual domain
 

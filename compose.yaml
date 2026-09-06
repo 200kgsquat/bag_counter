@@ -65,11 +65,30 @@ services:
 
   # ==========================================================
   # Redis
+  #
+  # Redis is intentionally transient:
+  # - Celery broker
+  # - live task state / progress
+  #
+  # Durable job results live in ./data/jobs as:
+  # input.mp4 / output.mp4 / result.json
   # ==========================================================
   redis:
     image: redis:7-alpine
 
     restart: unless-stopped
+
+    command:
+      [
+        "redis-server",
+        "--save",
+        "",
+        "--appendonly",
+        "no"
+      ]
+
+    tmpfs:
+      - /data
 
     healthcheck:
       test:
@@ -165,14 +184,14 @@ services:
     gpus: all
 
     command:
-      [
-        "celery",
-        "-A",
-        "app.worker.celery_app:celery_app",
-        "worker",
-        "--loglevel=INFO",
-        "--pool=solo"
-      ]
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        rm -f /tmp/bag-counter-runtime-ready
+        python -m scripts.check_runtime
+        touch /tmp/bag-counter-runtime-ready
+        exec celery -A app.worker.celery_app:celery_app worker --loglevel=INFO --pool=solo
 
     healthcheck:
       test:
@@ -180,7 +199,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import os, torch, mmcv, mmdet; assert os.path.isfile('/app/checkpoints/bag_detector.pth'); assert torch.cuda.is_available()"
+          "import os, torch; assert os.path.isfile('/tmp/bag-counter-runtime-ready'); assert torch.cuda.is_available()"
         ]
       interval: 30s
       timeout: 10s

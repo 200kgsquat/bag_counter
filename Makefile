@@ -56,7 +56,7 @@ test:
 
 
 doctor:
-	docker compose exec -T worker python -c "import os, torch, mmcv, mmdet; assert os.path.isfile('/app/checkpoints/bag_detector.pth'); assert torch.cuda.is_available(); print('GPU:', torch.cuda.get_device_name(0)); print('MMCV:', mmcv.__version__); print('MMDetection:', mmdet.__version__)"
+	docker compose exec -T worker python -m scripts.check_runtime
 
 
 clean:

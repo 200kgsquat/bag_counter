@@ -260,6 +260,12 @@ h1 {
     color: #fca5a5;
 }
 
+.badge.reconnecting,
+.badge.unavailable {
+    background: #422006;
+    color: #fde68a;
+}
+
 .progress-wrapper {
     margin-top: 30px;
 }

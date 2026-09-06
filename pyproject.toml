@@ -2,8 +2,10 @@
 name = "bag-counter"
 version = "0.1.0"
 requires-python = ">=3.10"
+
 dependencies = [
     "numpy>=1.24,<2.0",
+    "opencv-python-headless>=4.8,<5",
     "supervision==0.26.1",
 ]
 

@@ -3,10 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from celery.result import AsyncResult
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 
+from app.job_store import (
+    read_job_result,
+    read_job_status,
+    write_job_status,
+)
 from app.worker.celery_app import celery_app
 
 
@@ -15,7 +24,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
-JOBS_DIR = Path("data/jobs")
+
+JOBS_DIR = Path(
+    "data/jobs"
+)
 
 
 @app.on_event("startup")
@@ -40,9 +52,17 @@ def health() -> dict:
 def create_job(
     file: UploadFile = File(...),
 ) -> dict:
-    filename = file.filename or ""
+    filename = (
+        file.filename
+        or ""
+    )
 
-    if Path(filename).suffix.lower() != ".mp4":
+    if (
+        Path(filename)
+        .suffix
+        .lower()
+        != ".mp4"
+    ):
         raise HTTPException(
             status_code=400,
             detail="Only .mp4 files are supported",
@@ -50,34 +70,77 @@ def create_job(
 
     job_id = uuid4().hex
 
-    job_dir = JOBS_DIR / job_id
+    job_dir = (
+        JOBS_DIR
+        / job_id
+    )
 
     job_dir.mkdir(
         parents=True,
         exist_ok=False,
     )
 
-    input_path = job_dir / "input.mp4"
-    output_path = job_dir / "output.mp4"
+    input_path = (
+        job_dir
+        / "input.mp4"
+    )
+
+    output_path = (
+        job_dir
+        / "output.mp4"
+    )
 
     try:
-        with input_path.open("wb") as destination:
+        with input_path.open(
+            "wb"
+        ) as destination:
             while chunk := file.file.read(
                 1024 * 1024
             ):
-                destination.write(chunk)
+                destination.write(
+                    chunk
+                )
 
     finally:
         file.file.close()
 
-    celery_app.send_task(
-        "process_video",
-        args=[
-            str(input_path),
-            str(output_path),
-        ],
-        task_id=job_id,
+    write_job_status(
+        job_dir,
+        {
+            "status": "queued",
+            "progress": 0.0,
+            "processed_frames": 0,
+            "total_frames": 0,
+        },
     )
+
+    try:
+        celery_app.send_task(
+            "process_video",
+            args=[
+                str(input_path),
+                str(output_path),
+            ],
+            task_id=job_id,
+        )
+
+    except Exception as exc:
+        write_job_status(
+            job_dir,
+            {
+                "status": "failed",
+                "progress": 0.0,
+                "error": (
+                    "Could not enqueue processing task: "
+                    f"{exc}"
+                ),
+            },
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="Could not enqueue processing task",
+        ) from exc
 
     return {
         "job_id": job_id,
@@ -85,11 +148,16 @@ def create_job(
     }
 
 
-@app.get("/jobs/{job_id}")
+@app.get(
+    "/jobs/{job_id}"
+)
 def get_job(
     job_id: str,
 ) -> dict:
-    job_dir = JOBS_DIR / job_id
+    job_dir = (
+        JOBS_DIR
+        / job_id
+    )
 
     if not job_dir.exists():
         raise HTTPException(
@@ -97,58 +165,23 @@ def get_job(
             detail="Job not found",
         )
 
-    task = AsyncResult(
-        job_id,
-        app=celery_app,
+    status = read_job_status(
+        job_dir
     )
 
-    if task.state == "PENDING":
+    if status is not None:
         return {
             "job_id": job_id,
-            "status": "queued",
-            "progress": 0.0,
+            **status,
         }
 
-    if task.state in {
-        "STARTED",
-        "PROGRESS",
-    }:
-        info = (
-            task.info
-            if isinstance(
-                task.info,
-                dict,
-            )
-            else {}
-        )
+    # Compatibility with jobs created before
+    # status.json was introduced.
+    result = read_job_result(
+        job_dir
+    )
 
-        return {
-            "job_id": job_id,
-            "status": "processing",
-            "progress": info.get(
-                "progress",
-                0.0,
-            ),
-            "processed_frames": info.get(
-                "processed_frames",
-                0,
-            ),
-            "total_frames": info.get(
-                "total_frames",
-                0,
-            ),
-        }
-
-    if task.state == "SUCCESS":
-        result = (
-            task.result
-            if isinstance(
-                task.result,
-                dict,
-            )
-            else {}
-        )
-
+    if result is not None:
         return {
             "job_id": job_id,
             "status": "completed",
@@ -156,24 +189,24 @@ def get_job(
             **result,
         }
 
-    if task.state == "FAILURE":
-        return {
-            "job_id": job_id,
-            "status": "failed",
-            "error": str(task.info),
-        }
-
     return {
         "job_id": job_id,
-        "status": task.state.lower(),
+        "status": "failed",
+        "progress": 0.0,
+        "error": "Job status is unavailable",
     }
 
 
-@app.get("/jobs/{job_id}/result")
+@app.get(
+    "/jobs/{job_id}/result"
+)
 def download_result(
     job_id: str,
 ) -> FileResponse:
-    job_dir = JOBS_DIR / job_id
+    job_dir = (
+        JOBS_DIR
+        / job_id
+    )
 
     if not job_dir.exists():
         raise HTTPException(
@@ -181,12 +214,11 @@ def download_result(
             detail="Job not found",
         )
 
-    task = AsyncResult(
-        job_id,
-        app=celery_app,
+    result = read_job_result(
+        job_dir
     )
 
-    if task.state != "SUCCESS":
+    if result is None:
         raise HTTPException(
             status_code=409,
             detail="Result is not ready yet",
@@ -197,10 +229,16 @@ def download_result(
         / "output.mp4"
     )
 
-    if not output_path.exists():
+    if not output_path.is_file():
         raise HTTPException(
             status_code=404,
             detail="Result file not found",
+        )
+
+    if output_path.stat().st_size <= 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Result file is empty",
         )
 
     return FileResponse(

@@ -23,18 +23,40 @@ const anomalyList = document.getElementById("anomaly-list");
 const downloadButton = document.getElementById("download-button");
 const errorMessage = document.getElementById("error-message");
 const apiStatus = document.getElementById("api-status");
+const uploadError = document.getElementById("upload-error");
 
 let selectedFile = null;
 let pollingTimer = null;
+let currentJobId = null;
+let jobGeneration = 0;
+let jobFinished = false;
+let pollController = null;
+let pollFailures = 0;
+let uploading = false;
+const REQUEST_TIMEOUT_MS = 15000;
+const JOB_ID_PATTERN = /^[a-f0-9]{32}$/;
+const SAVED_JOB_KEY = "bag-counter.activeJob";
+
+async function fetchJson(url, controller = new AbortController()) {
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(url, { signal: controller.signal, cache: "no-store" });
+        if (!response.ok) {
+            const error = new Error(`Request failed (${response.status})`);
+            error.status = response.status;
+            throw error;
+        }
+        // Include reading the response body in the timeout.
+        return await response.json();
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
 
 async function checkApi() {
     try {
-        const response = await fetch("/api/health");
-
-        if (!response.ok) {
-            throw new Error("API unavailable");
-        }
+        await fetchJson("/api/health");
 
         apiStatus.classList.add("online");
         apiStatus.innerHTML =
@@ -43,21 +65,25 @@ async function checkApi() {
         apiStatus.classList.remove("online");
         apiStatus.innerHTML =
             '<span class="status-dot"></span> API offline';
+    } finally {
+        setTimeout(checkApi, 5000);
     }
 }
 
 
 function selectFile(file) {
-    if (!file) {
+    if (!file || uploading) {
         return;
     }
 
     if (!file.name.toLowerCase().endsWith(".mp4")) {
-        alert("Please select an MP4 video.");
+        uploadError.textContent = "Please select an MP4 video.";
+        uploadError.classList.remove("hidden");
         return;
     }
 
     selectedFile = file;
+    uploadError.classList.add("hidden");
 
     fileTitle.textContent = file.name;
 
@@ -93,52 +119,76 @@ dropZone.addEventListener("drop", (event) => {
 });
 
 
-uploadButton.addEventListener("click", async () => {
-    if (!selectedFile) {
-        return;
-    }
+function uploadVideo(file) {
+    return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", "/api/jobs");
+        request.timeout = 15 * 60 * 1000;
+        request.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                const percent = Math.round(event.loaded / event.total * 100);
+                uploadButton.textContent = percent < 100
+                    ? `Uploading ${percent}%...` : "Waiting for job confirmation...";
+            }
+        };
+        request.onload = () => {
+            let data;
+            try {
+                data = JSON.parse(request.responseText);
+            } catch {
+                reject(new Error(`Invalid upload response (${request.status}). Check server logs before uploading again.`));
+                return;
+            }
+            if (request.status < 200 || request.status >= 300) {
+                reject(new Error(typeof data?.detail === "string" ? data.detail : `Upload failed (${request.status})`));
+            } else if (!JOB_ID_PATTERN.test(data?.job_id || "")) {
+                reject(new Error("The server did not return a valid job ID."));
+            } else {
+                resolve(data);
+            }
+        };
+        const uncertainUpload = "Upload confirmation was lost. The server may have accepted the video; check its logs before uploading again.";
+        request.onerror = () => reject(new Error(uncertainUpload));
+        request.ontimeout = () => reject(new Error(uncertainUpload));
+        request.onabort = () => reject(new Error("Upload was interrupted."));
+        const formData = new FormData();
+        formData.append("file", file);
+        request.send(formData);
+    });
+}
 
+uploadButton.addEventListener("click", async () => {
+    if (!selectedFile || uploading) return;
+    uploading = true;
+    input.disabled = true;
     uploadButton.disabled = true;
     uploadButton.textContent = "Uploading...";
-
-    hideError();
-
-    const formData = new FormData();
-
-    formData.append("file", selectedFile);
-
+    uploadError.classList.add("hidden");
     try {
-        const response = await fetch("/api/jobs", {
-            method: "POST",
-            body: formData,
-        });
-
-        if (!response.ok) {
-            let message = "Upload failed";
-
-            try {
-                const data = await response.json();
-                message = data.detail || message;
-            } catch {
-                // response was not JSON
-            }
-
-            throw new Error(message);
-        }
-
-        const data = await response.json();
-
+        const data = await uploadVideo(selectedFile);
         showJob(data.job_id);
     } catch (error) {
-        showError(error.message);
+        uploadError.textContent = error.message;
+        uploadError.classList.remove("hidden");
     } finally {
-        uploadButton.disabled = false;
+        uploading = false;
+        input.disabled = false;
+        uploadButton.disabled = !selectedFile;
         uploadButton.textContent = "Start processing";
     }
 });
 
 
 function showJob(jobId) {
+    clearTimeout(pollingTimer);
+    if (pollController) pollController.abort();
+    currentJobId = jobId;
+    jobGeneration += 1;
+    jobFinished = false;
+    pollFailures = 0;
+    try { sessionStorage.setItem(SAVED_JOB_KEY, jobId); } catch { /* Optional storage. */ }
+    history.replaceState(null, "", `#job=${encodeURIComponent(jobId)}`);
+    hideError();
     jobCard.classList.remove("hidden");
 
     jobIdElement.textContent = jobId;
@@ -156,15 +206,13 @@ function showJob(jobId) {
     updateStatus("queued");
     updateProgress(0);
 
-    pollJob(jobId);
+    pollJob(jobId, jobGeneration);
 }
 
 
 function updateProgress(value) {
-    const progress = Math.max(
-        0,
-        Math.min(100, Number(value || 0))
-    );
+    const number = Number(value);
+    const progress = Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : 0;
 
     progressBar.style.width = `${progress}%`;
     progressText.textContent = `${progress.toFixed(1)}%`;
@@ -177,33 +225,39 @@ function updateStatus(status) {
 }
 
 
-async function pollJob(jobId) {
+async function pollJob(jobId, generation) {
+    if (generation !== jobGeneration || jobFinished) return;
     clearTimeout(pollingTimer);
-
+    const controller = new AbortController();
+    pollController = controller;
+    let nextDelay = 1000;
     try {
-        const response = await fetch(
-            `/api/jobs/${jobId}`
-        );
-
-        if (!response.ok) {
-            throw new Error("Cannot load job status");
-        }
-
-        const job = await response.json();
-
+        const job = await fetchJson(`/api/jobs/${encodeURIComponent(jobId)}`, controller);
+        // Ignore responses from an earlier job, even if abort arrived too late.
+        if (generation !== jobGeneration) return;
+        if (!job || typeof job.status !== "string") throw new Error("Invalid job status response");
+        pollFailures = 0;
+        hideError();
         renderJob(jobId, job);
-
-        if (
-            job.status !== "completed" &&
-            job.status !== "failed"
-        ) {
-            pollingTimer = setTimeout(
-                () => pollJob(jobId),
-                1000
-            );
-        }
+        jobFinished = job.status === "completed" || job.status === "failed";
     } catch (error) {
-        showError(error.message);
+        if (generation !== jobGeneration) return;
+        if (error.status === 404) {
+            jobFinished = true;
+            updateStatus("unavailable");
+            showError("This job is no longer available on the server.");
+            try { sessionStorage.removeItem(SAVED_JOB_KEY); } catch { /* Optional storage. */ }
+        } else {
+            pollFailures += 1;
+            nextDelay = Math.min(1000 * 2 ** Math.min(pollFailures, 4), 10000);
+            updateStatus("reconnecting");
+            showError(`Cannot refresh job status. Retrying in ${nextDelay / 1000}s; you do not need to upload the video again.`);
+        }
+    } finally {
+        if (generation === jobGeneration) {
+            pollController = null;
+            if (!jobFinished) pollingTimer = setTimeout(() => pollJob(jobId, generation), nextDelay);
+        }
     }
 }
 
@@ -227,7 +281,7 @@ function renderJob(jobId, job) {
             `${job.elapsed_seconds}s`;
     }
 
-    const anomalies = job.anomalies || [];
+    const anomalies = Array.isArray(job.anomalies) ? job.anomalies : [];
 
     anomalyCount.textContent = anomalies.length;
 
@@ -250,7 +304,7 @@ function renderJob(jobId, job) {
 }
 
 
-function renderAnomalies(anomalies) {
+function renderAnomalies(anomalies, visibleCount = 100) {
     anomalyList.innerHTML = "";
 
     if (anomalies.length === 0) {
@@ -260,7 +314,8 @@ function renderAnomalies(anomalies) {
 
     anomalySection.classList.remove("hidden");
 
-    for (const anomaly of anomalies) {
+    const fragment = document.createDocumentFragment();
+    for (const anomaly of anomalies.slice(0, visibleCount)) {
         const item = document.createElement("div");
 
         item.className = "anomaly-item";
@@ -271,8 +326,20 @@ function renderAnomalies(anomalies) {
             `frame ${anomaly.frame_index} · ` +
             `${anomaly.message}`;
 
-        anomalyList.appendChild(item);
+        fragment.appendChild(item);
     }
+    if (anomalies.length > visibleCount) {
+        const note = document.createElement("p");
+        note.textContent = `Showing ${visibleCount} of ${anomalies.length} anomalies.`;
+        fragment.appendChild(note);
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "primary-button";
+        more.textContent = "Show next 100 anomalies";
+        more.addEventListener("click", () => renderAnomalies(anomalies, visibleCount + 100));
+        fragment.appendChild(more);
+    }
+    anomalyList.appendChild(fragment);
 }
 
 
@@ -288,6 +355,21 @@ function hideError() {
 }
 
 
-checkApi();
+function resumePolling() {
+    if (currentJobId && !jobFinished && !pollController) {
+        clearTimeout(pollingTimer);
+        pollJob(currentJobId, jobGeneration);
+    }
+}
+window.addEventListener("online", resumePolling);
+window.addEventListener("focus", resumePolling);
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resumePolling();
+});
 
-setInterval(checkApi, 5000);
+checkApi();
+let savedJob = new URLSearchParams(location.hash.slice(1)).get("job");
+if (!savedJob) {
+    try { savedJob = sessionStorage.getItem(SAVED_JOB_KEY); } catch { /* Optional storage. */ }
+}
+if (JOB_ID_PATTERN.test(savedJob || "")) showJob(savedJob);

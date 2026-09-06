@@ -1,0 +1,7 @@
+{
+  "name": "bag-counter-frontend-tests",
+  "private": true,
+  "scripts": { "test": "node --test ../tests/frontend.test.cjs" },
+  "devDependencies": { "jsdom": "26.1.0" },
+  "engines": { "node": ">=18" }
+}
