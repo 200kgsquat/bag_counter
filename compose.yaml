@@ -13,51 +13,52 @@ services:
       - /bin/sh
       - -c
 
-    command: |
-      set -eu
+    command:
+      - |
+        set -eu
 
-      FILE="/checkpoints/bag_detector.pth"
-      TMP="/checkpoints/bag_detector.pth.part"
-      URL="https://github.com/200kgsquat/bag_counter/releases/latest/download/bag_detector.pth"
+        FILE="/checkpoints/bag_detector.pth"
+        TMP="/checkpoints/bag_detector.pth.part"
+        URL="https://github.com/200kgsquat/bag_counter/releases/latest/download/bag_detector.pth"
 
-      echo "Checking model checkpoint..."
+        echo "Checking model checkpoint..."
 
-      if [ -f "$$FILE" ]; then
-        SIZE=$$(wc -c < "$$FILE")
+        if [ -f "$$FILE" ]; then
+          SIZE=$$(wc -c < "$$FILE")
 
-        if [ "$$SIZE" -gt 1048576 ]; then
-          echo "Checkpoint already exists ($$SIZE bytes)"
-          exit 0
+          if [ "$$SIZE" -gt 1048576 ]; then
+            echo "Checkpoint already exists ($$SIZE bytes)"
+            exit 0
+          fi
+
+          echo "Existing checkpoint looks invalid, removing it..."
+          rm -f "$$FILE"
         fi
 
-        echo "Existing checkpoint looks invalid, removing it..."
-        rm -f "$$FILE"
-      fi
+        echo "Downloading checkpoint..."
 
-      echo "Downloading checkpoint..."
-
-      rm -f "$$TMP"
-
-      curl \
-        --fail \
-        --location \
-        --show-error \
-        --retry 3 \
-        --retry-delay 2 \
-        "$$URL" \
-        --output "$$TMP"
-
-      SIZE=$$(wc -c < "$$TMP")
-
-      if [ "$$SIZE" -le 1048576 ]; then
-        echo "Downloaded checkpoint looks invalid ($$SIZE bytes)"
         rm -f "$$TMP"
-        exit 1
-      fi
 
-      mv "$$TMP" "$$FILE"
+        curl \
+          --fail \
+          --location \
+          --show-error \
+          --retry 3 \
+          --retry-delay 2 \
+          "$$URL" \
+          --output "$$TMP"
 
-      echo "Checkpoint downloaded successfully ($$SIZE bytes)"
+        SIZE=$$(wc -c < "$$TMP")
+
+        if [ "$$SIZE" -le 1048576 ]; then
+          echo "Downloaded checkpoint looks invalid ($$SIZE bytes)"
+          rm -f "$$TMP"
+          exit 1
+        fi
+
+        mv "$$TMP" "$$FILE"
+
+        echo "Checkpoint downloaded successfully ($$SIZE bytes)"
 
     restart: "no"
 
@@ -146,8 +147,8 @@ services:
       MODEL_CHECKPOINT: /app/checkpoints/bag_detector.pth
       MODEL_DEVICE: cuda:0
 
-      # ByteTrack uses low-confidence detections during
-      # its second association stage.
+      # Keep low-confidence detections so ByteTrack can use
+      # them during its second association stage.
       SCORE_THRESHOLD: "0.10"
 
     volumes:

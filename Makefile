@@ -5,11 +5,14 @@ API_URL := http://127.0.0.1:8000
 
 
 app:
-	docker compose up --build -d --remove-orphans --force-recreate --wait
 	@echo ""
-	@echo "Bag Counter is ready"
+	@echo "Bag Counter"
 	@echo "Frontend: $(APP_URL)"
 	@echo "Swagger:  $(API_URL)/docs"
+	@echo ""
+	@echo "Starting Docker Compose..."
+	@echo ""
+	docker compose up --build
 
 
 build:
@@ -17,7 +20,7 @@ build:
 
 
 up:
-	docker compose up -d --wait
+	docker compose up
 
 
 down:
