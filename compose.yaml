@@ -1,15 +1,90 @@
 services:
+  # ==========================================================
+  # Model checkpoint downloader
+  # ==========================================================
+  model:
+    image: curlimages/curl:8.10.1
+    user: "0:0"
+
+    volumes:
+      - ./checkpoints:/checkpoints
+
+    entrypoint:
+      - /bin/sh
+      - -c
+
+    command: |
+      set -eu
+
+      FILE="/checkpoints/bag_detector.pth"
+      TMP="/checkpoints/bag_detector.pth.part"
+      URL="https://github.com/200kgsquat/bag_counter/releases/latest/download/bag_detector.pth"
+
+      echo "Checking model checkpoint..."
+
+      if [ -f "$$FILE" ]; then
+        SIZE=$$(wc -c < "$$FILE")
+
+        if [ "$$SIZE" -gt 1048576 ]; then
+          echo "Checkpoint already exists ($$SIZE bytes)"
+          exit 0
+        fi
+
+        echo "Existing checkpoint looks invalid, removing it..."
+        rm -f "$$FILE"
+      fi
+
+      echo "Downloading checkpoint..."
+
+      rm -f "$$TMP"
+
+      curl \
+        --fail \
+        --location \
+        --show-error \
+        --retry 3 \
+        --retry-delay 2 \
+        "$$URL" \
+        --output "$$TMP"
+
+      SIZE=$$(wc -c < "$$TMP")
+
+      if [ "$$SIZE" -le 1048576 ]; then
+        echo "Downloaded checkpoint looks invalid ($$SIZE bytes)"
+        rm -f "$$TMP"
+        exit 1
+      fi
+
+      mv "$$TMP" "$$FILE"
+
+      echo "Checkpoint downloaded successfully ($$SIZE bytes)"
+
+    restart: "no"
+
+
+  # ==========================================================
+  # Redis
+  # ==========================================================
   redis:
     image: redis:7-alpine
+
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
 
 
+  # ==========================================================
+  # FastAPI
+  # ==========================================================
   api:
     build:
       context: .
@@ -30,18 +105,6 @@ services:
       redis:
         condition: service_healthy
 
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
     command:
       [
         "uvicorn",
@@ -52,7 +115,23 @@ services:
         "8000"
       ]
 
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
 
+
+  # ==========================================================
+  # Celery GPU worker
+  # ==========================================================
   worker:
     build:
       context: .
@@ -62,10 +141,13 @@ services:
 
     environment:
       REDIS_URL: redis://redis:6379/0
+
       MODEL_CONFIG: /app/configs/rtmdet_bag.py
       MODEL_CHECKPOINT: /app/checkpoints/bag_detector.pth
       MODEL_DEVICE: cuda:0
-      # Keep ByteTrack's 0.10-0.25 second-association band available.
+
+      # ByteTrack uses low-confidence detections during
+      # its second association stage.
       SCORE_THRESHOLD: "0.10"
 
     volumes:
@@ -75,6 +157,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+      model:
+        condition: service_completed_successfully
 
     gpus: all
 
@@ -88,7 +173,23 @@ services:
         "--pool=solo"
       ]
 
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, torch, mmcv, mmdet; assert os.path.isfile('/app/checkpoints/bag_detector.pth'); assert torch.cuda.is_available()"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
 
+
+  # ==========================================================
+  # Frontend / Nginx
+  # ==========================================================
   frontend:
     build:
       context: ./frontend
@@ -102,3 +203,14 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1/api/health || exit 1"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s

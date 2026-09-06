@@ -16,6 +16,8 @@ Reference result for the supplied video:
 
 ### Requirements
 
+Before starting the application, make sure Docker is installed **and the Docker daemon is running**.
+
 You need:
 
 - Docker Desktop / Docker Engine
@@ -25,38 +27,28 @@ You need:
 
 You do **not** need to install Python, PyTorch, MMDetection, Redis, Celery, OpenCV or Nginx on the host.
 
-### Windows
+### Run
 
-```powershell
-git clone https://github.com/200kgsquat/bag_counter.git
-cd bag_counter
-.\start.bat
-```
-
-You can also double-click `start.bat` from Windows Explorer.
-
-### Linux
+Clone the repository:
 
 ```bash
 git clone https://github.com/200kgsquat/bag_counter.git
 cd bag_counter
-./start.sh
 ```
 
-The launch scripts automatically:
+If GNU Make is installed:
 
-- check Docker
-- check/start the Docker engine when possible
-- verify Docker Compose
-- check/download the model checkpoint
-- build and recreate containers
-- wait for FastAPI
-- verify the Celery worker
-- verify CUDA and the GPU
-- verify MMDetection/OpenCV runtime
-- verify the model checkpoint inside the worker
-- wait for the frontend
-- open the web UI when supported
+```bash
+make app
+```
+
+`make app` builds the images, downloads the model checkpoint when necessary, starts all services and waits until they become healthy.
+
+If GNU Make is not available, for example on a default Windows installation, run the underlying Docker Compose command directly:
+
+```bash
+docker compose up --build -d --remove-orphans --force-recreate --wait
+```
 
 Application:
 
@@ -68,12 +60,6 @@ Swagger:
 
 ```text
 http://127.0.0.1:8000/docs
-```
-
-The platform-independent runtime is still Docker Compose:
-
-```bash
-docker compose up --build -d
 ```
 
 ---
@@ -208,6 +194,8 @@ track #17
 1 physical bag
 ```
 
+ByteTrack also uses lower-confidence detections during its second association stage to preserve existing tracks when detection confidence temporarily drops.
+
 **Why:** counting requires persistent object identity across frames.
 
 **Trade-off:** tracking-by-detection can still suffer from ID switches when detections disappear or objects are heavily occluded.
@@ -232,7 +220,7 @@ The counter therefore increments only when a tracked bag crosses a configured bo
 
 Bounding boxes and track centers naturally jitter around the counting boundary.
 
-Without protection, the same object could appear to repeatedly switch sides.
+Without protection, the same object could repeatedly appear to switch sides.
 
 A dead zone is therefore used around the line.
 
@@ -312,7 +300,25 @@ NumPy         1.26.4
 
 Docker provides one reproducible runtime instead of requiring the reviewer to recreate the environment manually.
 
-**Trade-off:** Docker images are large and the first build can take time.
+**Trade-off:** Docker images are relatively large and the first build can take time.
+
+---
+
+### Docker-managed model checkpoint
+
+The trained model is distributed through a GitHub Release instead of normal Git history.
+
+During startup, a short-lived Docker service checks:
+
+```text
+checkpoints/bag_detector.pth
+```
+
+If the checkpoint is missing or invalid, it downloads it before the GPU worker starts.
+
+**Why:** large binary model files should not live in the normal Git history, while the application should still remain easy to start from a fresh clone.
+
+**Trade-off:** startup depends on the availability of the external release asset.
 
 ---
 
@@ -334,20 +340,19 @@ The directory is mounted into both API and worker containers.
 
 ---
 
-### OS-specific launch scripts
+### Makefile as a convenience layer
 
-The repository provides:
+The main startup command is:
 
-```text
-Windows -> start.bat
-Linux   -> start.sh
+```bash
+make app
 ```
 
-Both eventually start the same Docker Compose stack.
+The Makefile is intentionally thin and delegates the actual orchestration to Docker Compose.
 
-**Why:** the bootstrap experience differs by operating system, but the actual application runtime should remain identical.
+**Why:** Docker Compose remains the deployment source of truth, while Make provides short and memorable developer commands.
 
-**Trade-off:** there are two small launcher scripts to maintain, while Docker Compose stays the single source of truth for deployment.
+**Trade-off:** GNU Make is not installed by default on every operating system, so Docker Compose commands remain available directly.
 
 ---
 
@@ -364,8 +369,6 @@ reverse_movement
 A tracked bag crosses the counting line in the direction opposite to normal conveyor movement.
 
 **Why:** this can represent real conveyor reversal or a suspicious tracking trajectory that may affect count reliability.
-
----
 
 ### Low confidence near counting line
 
@@ -432,52 +435,53 @@ Returns the annotated MP4.
 
 ---
 
-## Model Checkpoint
-
-The worker expects:
-
-```text
-checkpoints/bag_detector.pth
-```
-
-If the checkpoint is missing, the launch scripts can download:
-
-```text
-bag_detector.pth
-```
-
-from the latest GitHub Release.
-
-The model is intentionally kept outside normal Git history to avoid storing a large binary directly in the repository.
-
----
-
 ## Docker Services
 
 ```text
-frontend -> Nginx web UI and /api proxy
-api      -> FastAPI job API
+model    -> downloads/checks the RTMDet checkpoint
 redis    -> Celery broker and result backend
+api      -> FastAPI job API
 worker   -> GPU video processing
+frontend -> Nginx web UI and /api proxy
+```
+
+The worker starts only after Redis is healthy and the model checkpoint is available.
+
+The frontend starts only after the API becomes healthy.
+
+### Useful commands
+
+Start:
+
+```bash
+make app
 ```
 
 Check status:
 
 ```bash
-docker compose ps
+make status
 ```
 
 Logs:
 
 ```bash
-docker compose logs -f
+make logs
+```
+
+Worker logs:
+
+```bash
+make worker-logs
 ```
 
 Stop:
 
 ```bash
-docker compose down
+make down
 ```
+
+The equivalent Docker Compose commands can also be used directly.
 
 ---
 
@@ -565,8 +569,10 @@ For a larger deployment I would consider:
 │   │   ├── counter.py
 │   │   ├── detector.py
 │   │   ├── pipeline.py
+│   │   ├── settings.py
 │   │   ├── tracker.py
-│   │   └── types.py
+│   │   ├── types.py
+│   │   └── video_processor.py
 │   └── worker/
 │       ├── celery_app.py
 │       └── tasks.py
@@ -574,16 +580,14 @@ For a larger deployment I would consider:
 ├── configs/
 │   └── rtmdet_bag.py
 ├── data/
-│   └── jobs/
 ├── frontend/
 ├── scripts/
-│   └── start.ps1
 ├── tests/
 ├── compose.yaml
 ├── Dockerfile
 ├── Makefile
-├── start.bat
-├── start.sh
+├── pyproject.toml
+├── uv.lock
 └── README.md
 ```
 
