@@ -47,7 +47,7 @@ make app
 If GNU Make is not available, for example on a default Windows installation, run the underlying Docker Compose command directly:
 
 ```bash
-docker compose up --build -d --remove-orphans --force-recreate --wait
+docker compose up --build
 ```
 
 Application:
