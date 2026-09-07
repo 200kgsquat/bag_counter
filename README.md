@@ -517,7 +517,7 @@ uv run pytest -q
 Current result:
 
 ```text
-26 passed
+33 passed
 ```
 
 Tests cover:
@@ -535,9 +535,10 @@ Tests cover:
 - empty and prematurely terminated video rejection
 - output-file validation
 - runtime-check success/failure reporting with a substituted GPU runtime
+- API recovery after temporary metadata read errors and completed-result precedence
 
 `--inexact` preserves extra packages already installed in the environment.
-These Python dependencies cover core tests; GPU inference uses Docker.
+These Python dependencies cover core and API tests; GPU inference uses Docker.
 
 Frontend recovery tests use Node.js 18+ and a simulated DOM/API:
 
@@ -559,6 +560,16 @@ docker compose up -d --build --no-deps frontend
 
 Rebuild the worker after its current job finishes when applying backend or
 startup changes.
+
+For API/proxy-only fixes, update those services without restarting the worker:
+
+```bash
+docker compose up -d --build --no-deps api frontend
+```
+
+Nginx refreshes the API service address through Docker DNS. Unreadable job
+metadata returns HTTP 503 so the interface retries, while a committed
+`result.json` takes precedence over an older status file.
 
 ### Why not unit-test exact neural-network predictions?
 
@@ -584,7 +595,7 @@ Main limitations:
 - side-of-line calculation currently treats the boundary as an infinite mathematical line
 - ByteTrack can still produce ID switches under severe occlusion
 - deployment assumes a single GPU worker
-- job status and downloads depend on Celery metadata, which expires one hour after completion; the video file remains on disk
+- interrupted jobs are not automatically recovered after a worker restart
 - videos are stored on local disk
 - the detector is trained for a specific visual domain
 

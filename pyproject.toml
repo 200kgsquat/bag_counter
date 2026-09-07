@@ -12,6 +12,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8,<9",
+    "fastapi",
+    "celery",
+    "python-multipart",
+    "httpx",
 ]
 
 [tool.pytest.ini_options]

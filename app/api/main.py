@@ -165,36 +165,31 @@ def get_job(
             detail="Job not found",
         )
 
-    status = read_job_status(
-        job_dir
-    )
-
-    if status is not None:
-        return {
-            "job_id": job_id,
-            **status,
-        }
-
-    # Compatibility with jobs created before
-    # status.json was introduced.
+    # result.json is committed before the final status update. A stale or
+    # temporarily unreadable status file must not hide a completed result.
     result = read_job_result(
         job_dir
     )
 
     if result is not None:
         return {
+            **result,
             "job_id": job_id,
             "status": "completed",
             "progress": 100.0,
-            **result,
         }
 
-    return {
-        "job_id": job_id,
-        "status": "failed",
-        "progress": 0.0,
-        "error": "Job status is unavailable",
-    }
+    status = read_job_status(job_dir)
+    if status is not None:
+        return {"job_id": job_id, **status}
+
+    # Missing/unreadable metadata is not evidence of processing failure.
+    # A retryable HTTP response keeps the frontend polling the running job.
+    raise HTTPException(
+        status_code=503,
+        detail="Job status is temporarily unavailable; retry shortly",
+        headers={"Retry-After": "1"},
+    )
 
 
 @app.get(
